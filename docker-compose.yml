@@ -1,0 +1,154 @@
+# =============================================================================
+#  Stack de la materia Ingeniería de Datos - LCD UCA Rosario 2026
+#  Define los servicios que corren, con qué versiones y cómo se conectan.
+#  Esto es "infraestructura como código": corre igual en cualquier máquina.
+# =============================================================================
+
+# Red compartida: todos los servicios se ven entre sí por su nombre de servicio
+# (ej. desde Airflow, la base se llama "postgres", no "localhost").
+networks:
+  datos-net:
+    driver: bridge
+
+# Volúmenes: acá viven los datos de forma persistente. Sobreviven a "make down".
+# "make clean" es lo único que los borra.
+volumes:
+  minio-data:
+  postgres-data:
+  metabase-data:
+  airflow-db-data:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # MinIO — Data Lake (almacenamiento de objetos, compatible con API de S3)
+  # Consola web: http://localhost:9001   API S3: http://localhost:9000
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # API S3 (la usan los scripts de ingesta)
+      - "9001:9001"   # Consola web (la abrís vos en el navegador)
+    volumes:
+      - minio-data:/data
+    networks:
+      - datos-net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # minio-setup — crea el bucket inicial del lake y termina. No es un servicio
+  # que quede corriendo: se ejecuta una vez, deja el bucket "lake" y muere.
+  # ---------------------------------------------------------------------------
+  minio-setup:
+    image: minio/mc:RELEASE.2024-06-12T14-34-03Z
+    container_name: minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/lake;
+      mc mb --ignore-existing local/lake/bronze;
+      mc mb --ignore-existing local/lake/silver;
+      mc mb --ignore-existing local/lake/gold;
+      echo 'Buckets del lake creados: bronze / silver / gold';
+      exit 0;
+      "
+    networks:
+      - datos-net
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — cumple DOS roles:
+  #   1) Base de metadatos de Airflow (esquema propio)
+  #   2) Base de serving para Metabase (esquema propio)
+  # En producción irían separadas; en clase, una sola alcanza y pesa menos.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: datos
+      POSTGRES_PASSWORD: datos
+      POSTGRES_DB: serving
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - datos-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Airflow — Orquestador. Versión "standalone": un solo contenedor con
+  # webserver + scheduler + su propia base SQLite interna para simplificar.
+  # Para la materia esto alcanza; la versión completa multi-contenedor llega
+  # en la Unidad VI cuando estudien orquestación en serio.
+  # Consola web: http://localhost:8080   (admin / admin)
+  # ---------------------------------------------------------------------------
+  airflow:
+    build:
+      context: ./docker/airflow
+      dockerfile: Dockerfile
+    container_name: airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://datos:datos@postgres:5432/serving
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "clave-dev-cualquiera"
+      AIRFLOW__WEBSERVER__SESSION_BACKEND: "securecookie"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./dbt:/opt/airflow/dbt
+      - airflow-db-data:/opt/airflow/logs
+    networks:
+      - datos-net
+    command: standalone
+
+  # ---------------------------------------------------------------------------
+  # Metabase — Capa de visualización / BI (serving hacia el negocio)
+  # Se conecta al Postgres de serving. Se configura en el primer uso.
+  # Consola web: http://localhost:3000
+  # ---------------------------------------------------------------------------
+  metabase:
+    image: metabase/metabase:v0.49.13
+    container_name: metabase
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: serving
+      MB_DB_PORT: 5432
+      MB_DB_USER: datos
+      MB_DB_PASS: datos
+      MB_DB_HOST: postgres
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase-data:/metabase-data
+    networks:
+      - datos-net

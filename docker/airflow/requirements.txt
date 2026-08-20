@@ -1,0 +1,15 @@
+# --- Transformación (Unidad V) ---
+dbt-core==1.8.6
+dbt-duckdb==1.8.4
+duckdb==1.0.0
+
+# --- Ingesta / acceso a datos (Unidades III-IV) ---
+requests==2.32.3
+pandas==2.2.2
+pyarrow==17.0.0          # lectura/escritura de Parquet
+s3fs==2024.6.1           # hablar con MinIO como si fuera S3
+boto3==1.34.131          # cliente S3 de bajo nivel (para scripts de ingesta)
+
+# --- Serving (Unidad VIII) ---
+psycopg2-binary==2.9.9   # conexión a PostgreSQL
+sqlalchemy==1.4.52       # compatible con Airflow 2.9

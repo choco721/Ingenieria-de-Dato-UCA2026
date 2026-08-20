@@ -1,0 +1,27 @@
+name: 'proyecto_datos'
+version: '1.0.0'
+config-version: 2
+
+# Perfil de conexión (definido en profiles.yml). Usamos DuckDB como motor
+# de transformación, leyendo del lake (MinIO) y materializando por capas.
+profile: 'proyecto_datos'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Arquitectura Medallion: cada capa como carpeta con su materialización.
+models:
+  proyecto_datos:
+    bronze:
+      +materialized: view
+    silver:
+      +materialized: table
+    gold:
+      +materialized: table

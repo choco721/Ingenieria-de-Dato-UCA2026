@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# --- dbt ---
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+*.duckdb
+*.duckdb.wal
+
+# --- Datos: NO subir datos al repo. El lake vive en MinIO, no en git. ---
+seed/*.csv
+seed/*.parquet
+*.parquet
+
+# --- Secretos: nunca subir credenciales reales ---
+.env
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
+
+# --- Airflow ---
+logs/
